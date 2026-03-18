@@ -90,12 +90,15 @@ function queryDailyTask() {
       }
     })
     .then((resp) => {
-      $.tasks = JSON.parse(resp.body).obj.taskTitleLevels
+      const obj = JSON.parse(resp.body).obj
+      $.tasks = obj.taskTitleLevels
+      $.totalPoints = obj.totalPoint || 0
     })
 }
 
 async function signDailyTasks() {
   await queryDailyTask()
+  $.pointsBefore = $.totalPoints
 
   for (let i = 0; i < $.tasks.length; i++) {
     const task = $.tasks[i]
@@ -158,6 +161,10 @@ async function signDailyTasks() {
 
     await $.wait(3000)
   }
+
+  // 任务结束后再查一次积分
+  await queryDailyTask()
+  $.pointsAfter = $.totalPoints
 }
 
 function doTask(task) {
@@ -269,6 +276,11 @@ function showmsg() {
     const result = $.tasks[i].result
     $.desc.push(`${name}: ${result}`)
   }
+
+  const earned = ($.pointsAfter || 0) - ($.pointsBefore || 0)
+  $.desc.push('', `💰 执行前积分: ${$.pointsBefore || 0}`)
+  $.desc.push(`💰 执行后积分: ${$.pointsAfter || 0}`)
+  $.desc.push(`✨ 本次获得: ${earned > 0 ? '+' + earned : earned}`)
 
   $.msg($.name, $.subt, $.desc.join('\n'))
 }
