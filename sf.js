@@ -1,34 +1,65 @@
 const $ = new Env('顺丰速运')
-$.KEY_login = 'chavy_login_sfexpress'
+$.KEY_login_list = 'chavy_login_sfexpress_list'
 
 const SKIP_TASKS = ['用行业模板寄件下单', '用积分兑任意礼品', '参与积分活动', '每月累计寄件', '完成每月任务', '去使用AI寄件']
 
 !(async () => {
-  await loginapp()
-  await $.wait('1000')
-  await loginweb()
-  await $.wait('1000')
-  await appSign()
-  await $.wait('1000')
-  await sign()
-  await $.wait('1000')
-  await signDailyTasks()
+  const loginList = $.getjson($.KEY_login_list) || []
+  if (!loginList.length) {
+    $.msg($.name, '无账号', '请先通过顺丰cookie.js抓取登录信息')
+    return
+  }
+
+  $.allResults = []
+
+  for (let i = 0; i < loginList.length; i++) {
+    const loginOpts = loginList[i]
+    let mobile = ''
+    try { mobile = JSON.parse(loginOpts.body).mobile || '' } catch (e) {}
+
+    console.log(`\n${'='.repeat(50)}`)
+    console.log(`👤 账号 ${i + 1}/${loginList.length}${mobile ? ' (' + mobile + ')' : ''}`)
+    console.log('='.repeat(50))
+
+    const acctResult = { index: i + 1, mobile }
+    $.allResults.push(acctResult)
+
+    await loginapp(loginOpts)
+    await $.wait(1000)
+    await loginweb()
+    await $.wait(1000)
+    await appSign()
+    await $.wait(1000)
+    await sign()
+    await $.wait(1000)
+    await signDailyTasks()
+
+    acctResult.sign = $.sign
+    acctResult.tasks = $.tasks ? [...$.tasks] : []
+    acctResult.pointsBefore = $.pointsBefore || 0
+    acctResult.pointsAfter = $.pointsAfter || 0
+
+    if (i < loginList.length - 1) {
+      console.log('⏳ 等待2秒后执行下一个账号...')
+      await $.wait(2000)
+    }
+  }
+
   showmsg()
 })()
   .catch((e) => $.logErr(e))
   .finally(() => $.done())
 
-function loginapp() {
-  const loginOpts = $.getjson($.KEY_login)
-  delete loginOpts.headers.Cookie
-
+function loginapp(loginOpts) {
+  const opts = Object.assign({}, loginOpts)
+  delete opts.headers.Cookie
   return $.http
-    .post(loginOpts)
+    .post(opts)
     .then((resp) => {
       $.login = JSON.parse(resp.body)
     })
     .catch((err) => {
-      console.log(err)
+      console.log(`❌ loginapp 失败: ${err}`)
     })
 }
 
@@ -253,36 +284,31 @@ function getPoint(task) {
 }
 
 function showmsg() {
-  const success = $.sign && $.sign.success
-  $.subt = `签到: `
-  $.desc = []
-  if (success) {
-    if ($.sign.obj.hasFinishSign){
-      $.subt += `重复`
-      $.desc.push(`说明: 连续签到${$.sign.obj.countDay}天`)
-    } else {
-      $.subt += `成功`
-      $.desc.push(`说明: 连续签到${$.sign.obj.countDay}天`)
+  const lines = []
+
+  for (const r of $.allResults) {
+    const tag = `账号${r.index}${r.mobile ? '(' + r.mobile + ')' : ''}`
+    lines.push(`\n【${tag}】`)
+
+    const sign = r.sign
+    if (sign && sign.success) {
+      const day = sign.obj.countDay
+      lines.push(`签到: ${sign.obj.hasFinishSign ? '重复' : '成功'}，连续${day}天`)
+    } else if (sign) {
+      lines.push(`签到: 失败 - ${sign.errorMessage}`)
     }
-  } else {
-    const errmsg = $.sign.errorMessage
-    $.subt += `失败`
-    $.desc.push(`说明: ${errmsg}`)
+
+    if (r.tasks && r.tasks.length) {
+      for (const t of r.tasks) {
+        lines.push(`${t.title}: ${t.result || ''}`)
+      }
+    }
+
+    const earned = r.pointsAfter - r.pointsBefore
+    lines.push(`💰 积分: ${r.pointsBefore} → ${r.pointsAfter} (${earned >= 0 ? '+' : ''}${earned})`)
   }
 
-  $.desc.push('', `每日任务: `)
-  for (let i = 0; i < $.tasks.length; i++) {
-    const name = $.tasks[i].title
-    const result = $.tasks[i].result
-    $.desc.push(`${name}: ${result}`)
-  }
-
-  const earned = ($.pointsAfter || 0) - ($.pointsBefore || 0)
-  $.desc.push('', `💰 执行前积分: ${$.pointsBefore || 0}`)
-  $.desc.push(`💰 执行后积分: ${$.pointsAfter || 0}`)
-  $.desc.push(`✨ 本次获得: ${earned > 0 ? '+' + earned : earned}`)
-
-  $.msg($.name, $.subt, $.desc.join('\n'))
+  $.msg($.name, `共${$.allResults.length}个账号`, lines.join('\n'))
 }
 
 // prettier-ignore
